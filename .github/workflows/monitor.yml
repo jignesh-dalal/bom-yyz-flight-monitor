@@ -1,0 +1,39 @@
+name: BOM→YYZ Flight Monitor
+
+on:
+  schedule:
+    # Every 2 hours between 06:00 and 23:59 UTC (roughly 11:30–05:00 IST)
+    # The API doesn't need hourly checks — every 2h is sufficient
+    - cron: '0 6,8,10,12,14,16,18,20,22 * * *'
+  workflow_dispatch:  # allow manual trigger too
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          # Need token with repo scope to push state file back
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run flight monitor
+        run: python3 monitor.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Commit price state if changed
+        run: |
+          if ! git diff --exit-code --quiet prices.json 2>/dev/null; then
+            git config user.name "Flight Monitor Bot"
+            git config user.email "jignesh.h.dalal+bot@gmail.com"
+            git add prices.json
+            git commit -m "Update price state [$(date -u +'%Y-%m-%d %H:%M UTC')]"
+            git push
+            echo "✓ Price state committed"
+          else
+            echo "✓ Price state unchanged"
+          fi
