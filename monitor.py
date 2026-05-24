@@ -163,7 +163,7 @@ def parse_api_response(result_stdout):
     return output
 
 
-def fetch_prices_for_date(departure_date, return_date):
+def fetch_prices_for_date(departure_date, return_date, attempt=1):
     ts = int(datetime.now().timestamp())
     body = json.dumps({
         "flightfrom": ORIGIN, "flightto": DEST,
@@ -179,16 +179,35 @@ def fetch_prices_for_date(departure_date, return_date):
         "benchmark": "1", "travel": "INT", "flightfaretype": "",
         "traceId": f"mon_{ts}", "timestamp": ts,
     })
+    user_agents = [
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    ]
+    ua = user_agents[(ts % len(user_agents))]
     result = subprocess.run(
         ["curl", "-s", "--max-time", "25", SEARCH_URL,
          "-H", "Content-Type: application/json",
-         "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+         "-H", f"User-Agent: {ua}",
          "-H", "Referer: https://offers.reward360.in/v2/compare-fly",
+         "-H", "Origin: https://offers.reward360.in",
          "-d", body],
         capture_output=True, text=True, timeout=30)
+
     if result.returncode != 0:
         raise RuntimeError(f"curl failed (exit {result.returncode}): {result.stderr}")
-    return parse_api_response(result.stdout)
+
+    # Try to parse — if empty/non-JSON, retry once
+    try:
+        return parse_api_response(result.stdout)
+    except (json.JSONDecodeError, KeyError) as e:
+        if attempt < 2:
+            print(f"  [API retry {attempt}: bad response ({e}), retrying...]")
+            return fetch_prices_for_date(departure_date, return_date, attempt=2)
+        # Show what we got for debugging
+        preview = result.stdout[:500] if result.stdout else "(empty)"
+        print(f"  [API response preview: {preview}]")
+        raise
 
 
 def fetch_prices():
